@@ -108,7 +108,7 @@ extract_nt_metadata() {
     local acc="$1"
     local tmpfile="${TMP_DIR}/nt_${acc}.gb"
     
-    echo "  [NT] Fetching GenBank record..." >&2
+    >&2 echo "  [NT] Fetching GenBank record..."
     
     # Initialize all variables
     local organism="N/A"
@@ -131,9 +131,9 @@ extract_nt_metadata() {
     # METHOD 1: GenBank Flat File Parsing
     # ========================================================================
     if ! efetch -db nuccore -id "${acc}" -format gb 2>/dev/null > "${tmpfile}"; then
-        echo "  ✗ Failed to fetch GenBank record" >&2
+        >&2 echo "  ✗ Failed to fetch GenBank record"
         echo -e "${biosample}\t${organism}\t${country}\t${geo_loc}\t${latitude}\t${longitude}\t${isolate}\t${strain}\t${cultivar}\t${collection_date}\t${host}\t${tissue}\t${platform}\t${library}"
-        return 1
+        return 0
     fi
     
     # Extract organism
@@ -153,20 +153,20 @@ extract_nt_metadata() {
     # Parse coordinates if found in GenBank
     if [[ -n "$lat_lon" ]]; then
         read latitude longitude < <(parse_latlon "$lat_lon")
-        echo "    ✓ [Method 1: GenBank] Coordinates: $latitude, $longitude" >&2
+        >&2 echo "    ✓ [Method 1: GenBank] Coordinates: $latitude, $longitude"
     fi
     
     # ========================================================================
     # METHOD 2: BioSample via NT Accession Link
     # ========================================================================
-    echo "  [NT] Linking to BioSample..." >&2
+    >&2 echo "  [NT] Linking to BioSample..."
     biosample=$(timeout 17 bash -c "esearch -db nuccore -query '${acc}' 2>/dev/null | \
                 elink -target biosample 2>/dev/null | \
                 efetch -format docsum 2>/dev/null | \
                 xtract -pattern DocumentSummary -element Accession 2>/dev/null | head -n1" || echo "N/A")
     
     if [[ "$biosample" != "N/A" && -n "$biosample" ]]; then
-        echo "    ✓ BioSample found: $biosample" >&2
+        >&2 echo "    ✓ BioSample found: $biosample"
         
         local bs_data=$(timeout 17 efetch -db biosample -id "$biosample" -format docsum 2>/dev/null || echo "")
         
@@ -178,7 +178,7 @@ extract_nt_metadata() {
                 
                 if [[ -n "$bs_latlon" ]]; then
                     read latitude longitude < <(parse_latlon "$bs_latlon")
-                    echo "    ✓ [Method 2: BioSample] Coordinates: $latitude, $longitude" >&2
+                    >&2 echo "    ✓ [Method 2: BioSample] Coordinates: $latitude, $longitude"
                 fi
             fi
             
@@ -238,7 +238,7 @@ extract_nt_metadata() {
 extract_sra_metadata() {
     local acc="$1"
     
-    echo "  [SRA] Fetching run information..." >&2
+    >&2 echo "  [SRA] Fetching run information..."
     
     # Initialize all variables
     local organism="N/A"
@@ -263,9 +263,9 @@ extract_sra_metadata() {
                     efetch -format runinfo 2>/dev/null | tail -n1" || echo "")
     
     if [[ -z "$runinfo" ]]; then
-        echo "  ✗ Failed to fetch SRA runinfo" >&2
+        >&2 echo "  ✗ Failed to fetch SRA runinfo"
         echo -e "${biosample}\t${organism}\t${country}\t${geo_loc}\t${latitude}\t${longitude}\t${isolate}\t${strain}\t${cultivar}\t${collection_date}\t${host}\t${tissue}\t${platform}\t${library}"
-        return 1
+        return 0
     fi
     
     # Parse CSV runinfo
@@ -274,13 +274,13 @@ extract_sra_metadata() {
     platform=$(echo "$runinfo" | cut -d',' -f19)
     library=$(echo "$runinfo" | cut -d',' -f13)
     
-    echo "    ✓ [Method 1: RunInfo] Platform: $platform, Library: $library" >&2
+    >&2 echo "    ✓ [Method 1: RunInfo] Platform: $platform, Library: $library"
     
     # ========================================================================
     # METHOD 2: BioSample via SRA Accession (for geographic data)
     # ========================================================================
     if [[ -n "$biosample" && "$biosample" != "N/A" ]]; then
-        echo "  [SRA] Fetching BioSample: $biosample" >&2
+        >&2 echo "  [SRA] Fetching BioSample: $biosample"
         
         local bs_data=$(timeout 17 efetch -db biosample -id "$biosample" -format docsum 2>/dev/null || echo "")
         
@@ -295,7 +295,7 @@ extract_sra_metadata() {
             
             if [[ -n "$bs_latlon" ]]; then
                 read latitude longitude < <(parse_latlon "$bs_latlon")
-                echo "    ✓ [Method 2: BioSample harmonized] Coordinates: $latitude, $longitude" >&2
+                >&2 echo "    ✓ [Method 2: BioSample harmonized] Coordinates: $latitude, $longitude"
             fi
             
             # Extract other attributes
@@ -406,7 +406,7 @@ if [[ -f "${NT_ACCESSIONS}" && -s "${NT_ACCESSIONS}" ]]; then
     echo "================================================================================" >&2
     echo "" >&2
     
-    while IFS= read -r acc || [[ -n "$acc" ]]; do
+    while IFS= read -r acc <&3 || [[ -n "$acc" ]]; do
         # Skip empty lines and comments
         [[ -z "$acc" || "$acc" =~ ^# ]] && continue
         
@@ -422,24 +422,21 @@ if [[ -f "${NT_ACCESSIONS}" && -s "${NT_ACCESSIONS}" ]]; then
         echo "--------------------------------------------------------------------------------" >&2
         
         # Extract metadata (don't let failures stop the loop)
-        if metadata=$(extract_nt_metadata "$acc" 2>&1); then
-            # Check if has coordinates
-            if echo "$metadata" | cut -f5 | grep -qv "N/A"; then
-                with_coords=$((with_coords + 1))
-            fi
-            # Write to output
-            echo -e "${acc}\tNT\t${metadata}" >> "${FINAL_OUTPUT}"
-        else
-            # Write N/A row if extraction failed
-            echo -e "${acc}\tNT\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A" >> "${FINAL_OUTPUT}"
-            echo "  ✗ Failed to extract metadata, wrote N/A row" >&2
+        metadata=$(extract_nt_metadata "$acc" || true)
+        
+        # Write to output
+        echo -e "${acc}\tNT\t${metadata}" >> "${FINAL_OUTPUT}"
+        
+        # Check if has coordinates
+        if echo "$metadata" | cut -f5 | grep -qv "N/A"; then
+            with_coords=$((with_coords + 1))
         fi
         
         # Rate limiting to avoid NCBI throttling
         sleep 0.5
         echo "" >&2
         
-    done < "${NT_ACCESSIONS}"
+    done 3< "${NT_ACCESSIONS}"
 fi
 
 ################################################################################
@@ -452,7 +449,7 @@ if [[ -f "${SRA_ACCESSIONS}" && -s "${SRA_ACCESSIONS}" ]]; then
     echo "================================================================================" >&2
     echo "" >&2
     
-    while IFS= read -r acc || [[ -n "$acc" ]]; do
+    while IFS= read -r acc <&4 || [[ -n "$acc" ]]; do
         # Skip empty lines and comments
         [[ -z "$acc" || "$acc" =~ ^# ]] && continue
         
@@ -468,24 +465,21 @@ if [[ -f "${SRA_ACCESSIONS}" && -s "${SRA_ACCESSIONS}" ]]; then
         echo "--------------------------------------------------------------------------------" >&2
         
         # Extract metadata (don't let failures stop the loop)
-        if metadata=$(extract_sra_metadata "$acc" 2>&1); then
-            # Check if has coordinates
-            if echo "$metadata" | cut -f5 | grep -qv "N/A"; then
-                with_coords=$((with_coords + 1))
-            fi
-            # Write to output
-            echo -e "${acc}\tSRA\t${metadata}" >> "${FINAL_OUTPUT}"
-        else
-            # Write N/A row if extraction failed
-            echo -e "${acc}\tSRA\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A" >> "${FINAL_OUTPUT}"
-            echo "  ✗ Failed to extract metadata, wrote N/A row" >&2
+        metadata=$(extract_sra_metadata "$acc" || true)
+        
+        # Write to output
+        echo -e "${acc}\tSRA\t${metadata}" >> "${FINAL_OUTPUT}"
+        
+        # Check if has coordinates
+        if echo "$metadata" | cut -f5 | grep -qv "N/A"; then
+            with_coords=$((with_coords + 1))
         fi
         
         # Rate limiting to avoid NCBI throttling
         sleep 0.5
         echo "" >&2
         
-    done < "${SRA_ACCESSIONS}"
+    done 4< "${SRA_ACCESSIONS}"
 fi
 
 ################################################################################
