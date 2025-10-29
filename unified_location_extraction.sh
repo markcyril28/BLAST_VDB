@@ -25,7 +25,7 @@
 # Date: October 29, 2025
 ################################################################################
 
-set -euo pipefail
+set -uo pipefail
 
 ################################################################################
 # Environment Setup
@@ -421,16 +421,19 @@ if [[ -f "${NT_ACCESSIONS}" && -s "${NT_ACCESSIONS}" ]]; then
         echo "[${processed}/${total_accs}] Processing NT Accession: ${acc}" >&2
         echo "--------------------------------------------------------------------------------" >&2
         
-        # Extract metadata
-        metadata=$(extract_nt_metadata "$acc" || echo "N/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A")
-        
-        # Check if has coordinates
-        if echo "$metadata" | cut -f5 | grep -qv "N/A"; then
-            with_coords=$((with_coords + 1))
+        # Extract metadata (don't let failures stop the loop)
+        if metadata=$(extract_nt_metadata "$acc" 2>&1); then
+            # Check if has coordinates
+            if echo "$metadata" | cut -f5 | grep -qv "N/A"; then
+                with_coords=$((with_coords + 1))
+            fi
+            # Write to output
+            echo -e "${acc}\tNT\t${metadata}" >> "${FINAL_OUTPUT}"
+        else
+            # Write N/A row if extraction failed
+            echo -e "${acc}\tNT\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A" >> "${FINAL_OUTPUT}"
+            echo "  ✗ Failed to extract metadata, wrote N/A row" >&2
         fi
-        
-        # Write to output
-        echo -e "${acc}\tNT\t${metadata}" >> "${FINAL_OUTPUT}"
         
         # Rate limiting to avoid NCBI throttling
         sleep 0.5
@@ -464,16 +467,19 @@ if [[ -f "${SRA_ACCESSIONS}" && -s "${SRA_ACCESSIONS}" ]]; then
         echo "[${processed}/${total_accs}] Processing SRA Accession: ${acc}" >&2
         echo "--------------------------------------------------------------------------------" >&2
         
-        # Extract metadata
-        metadata=$(extract_sra_metadata "$acc" || echo "N/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A")
-        
-        # Check if has coordinates
-        if echo "$metadata" | cut -f5 | grep -qv "N/A"; then
-            with_coords=$((with_coords + 1))
+        # Extract metadata (don't let failures stop the loop)
+        if metadata=$(extract_sra_metadata "$acc" 2>&1); then
+            # Check if has coordinates
+            if echo "$metadata" | cut -f5 | grep -qv "N/A"; then
+                with_coords=$((with_coords + 1))
+            fi
+            # Write to output
+            echo -e "${acc}\tSRA\t${metadata}" >> "${FINAL_OUTPUT}"
+        else
+            # Write N/A row if extraction failed
+            echo -e "${acc}\tSRA\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A\tN/A" >> "${FINAL_OUTPUT}"
+            echo "  ✗ Failed to extract metadata, wrote N/A row" >&2
         fi
-        
-        # Write to output
-        echo -e "${acc}\tSRA\t${metadata}" >> "${FINAL_OUTPUT}"
         
         # Rate limiting to avoid NCBI throttling
         sleep 0.5
